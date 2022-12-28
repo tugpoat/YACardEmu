@@ -90,7 +90,7 @@ void CardIo::Command_33_ReadData2()
 	}
 
 	Mode mode = static_cast<Mode>(currentPacket[0]);
-	BitMode bit = static_cast<BitMode>(currentPacket[1]);
+	//BitMode bit = static_cast<BitMode>(currentPacket[1]);
 	Track track = static_cast<Track>(currentPacket[2]);
 
 	switch (currentStep) {
@@ -252,7 +252,7 @@ void CardIo::Command_53_WriteData2()
 	} 
 
 	Mode mode = static_cast<Mode>(currentPacket[0]);
-	BitMode bit = static_cast<BitMode>(currentPacket[1]);
+	//BitMode bit = static_cast<BitMode>(currentPacket[1]);
 	Track track = static_cast<Track>(currentPacket[2]);
 
 	switch (currentStep) {
@@ -389,9 +389,9 @@ void CardIo::Command_7C_PrintL()
 		return;
 	}
 
-	Mode mode = static_cast<Mode>(currentPacket[0]);
-	BufferControl control = static_cast<BufferControl>(currentPacket[1]);
-	uint8_t lineOffset = currentPacket[2];
+	//Mode mode = static_cast<Mode>(currentPacket[0]);
+	//BufferControl control = static_cast<BufferControl>(currentPacket[1]);
+	//uint8_t lineOffset = currentPacket[2];
 
 	switch (currentStep) {
 		case 1:

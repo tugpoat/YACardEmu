@@ -269,33 +269,30 @@ int main()
 	std::signal(SIGINT, sigHandler);
 	std::signal(SIGTERM, sigHandler);
 
-
 	CardIo::Settings cardSettings;
-	std::string tgtDevice;
-
-	SerIo *serialHandler = new SerIo();
+	std::string tgtDevice{};
+	std::unique_ptr<CardIo> cardHandler{};
 	int httpPort = 8080;
+
+	std::unique_ptr<SerIo> serialHandler{std::make_unique<SerIo>()};
+	if (!serialHandler->Open()) {
+		spdlog::critical("Couldn't initalize the serial controller.");
+		return 1;
+	}
 
 	if (!readConfig(tgtDevice, serialHandler->portSettings, cardSettings, &httpPort)) {
 		return 1;
 	}
 
-	CardIo *cardHandler;
-
-	if (tgtDevice == "C1231LR")
-		cardHandler = new C1231LR();
-	else if (tgtDevice == "C1231BR")
-		cardHandler = new C1231BR();
-	else {
+	if (tgtDevice == "C1231LR") {
+		cardHandler = std::make_unique<C1231LR>();
+	} else if (tgtDevice == "C1231BR") {
+		cardHandler = std::make_unique<C1231BR>();
+	} else {
 		spdlog::critical("Invalid target device: " + tgtDevice);
 		return 1;
 	}
 	cardHandler->cardSettings = cardSettings;
-
-	if (!serialHandler->Open()) {
-		spdlog::critical("Couldn't initalize the serial controller.");
-		return 1;
-	}
 
 	spdlog::info("Starting API server...");
 	std::thread(httpServer, httpPort, &cardHandler->cardSettings).detach();

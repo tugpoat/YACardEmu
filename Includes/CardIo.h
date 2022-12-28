@@ -62,6 +62,7 @@ public:
 	};
 
 	CardIo();
+	virtual ~CardIo() = default;
 	CardIo::StatusCode BuildPacket(std::vector<uint8_t> &readBuffer);
 	CardIo::StatusCode ReceivePacket(std::vector<uint8_t> &writeBuffer);
 

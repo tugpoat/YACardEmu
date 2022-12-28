@@ -43,7 +43,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release")
 	endif()
 endif()
 
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 11)
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 14)
 
 if (MSVC)
 	target_compile_options(${PROJECT_NAME} PRIVATE /W4)
