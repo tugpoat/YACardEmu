@@ -11,6 +11,7 @@ add_executable(${PROJECT_NAME}
 	Includes/C1231LR.cpp
 	Includes/C1231BR.cpp
 	Includes/base64.cpp
+	Includes/WebIo.cpp
 )
 
 if (WIN32)
@@ -52,11 +53,20 @@ else()
 	target_compile_options(${PROJECT_NAME} PRIVATE -march=native -Wall -Wextra -Wpedantic)
 endif()
 
+if (WIN32)
+target_link_libraries(${PROJECT_NAME}
+	${SERIAL_LIBRARIES}
+	${CMAKE_THREAD_LIBS_INIT}
+	spdlog::spdlog
+	libserialport
+)
+else()
 target_link_libraries(${PROJECT_NAME}
 	${SERIAL_LIBRARIES}
 	${CMAKE_THREAD_LIBS_INIT}
 	spdlog::spdlog
 )
+endif()
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_directory
