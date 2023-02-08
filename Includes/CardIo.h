@@ -147,7 +147,7 @@ protected:
 	void WriteTrack(std::vector<uint8_t> &trackData, int trackNumber);
 
 	// Commands
-	void Command_10_Initalize();
+	virtual void Command_10_Initalize();
 	void Command_20_ReadStatus();
 	void Command_33_ReadData2(); // multi-track read
 	void Command_35_GetData(); // Spit out the entire card

@@ -22,18 +22,18 @@
 #ifndef C1231BR_H
 #define C1231BR_H
 
-#include <vector>
-#include <iostream>
-#include <fstream>
 #include <atomic>
 #include <ctime>
+#include <fstream>
+#include <iostream>
+#include <vector>
 
 #include "CardIo.h"
 
-class C1231BR : public CardIo
-{
+class C1231BR : public CardIo {
 public:
 	C1231BR();
+
 protected:
 	enum class CardPosition {
 		NO_CARD        = 0b00000,
@@ -44,12 +44,14 @@ protected:
 	};
 
 	struct LocalStatus {
-		bool shutter{};
+		bool shutter{true};
 		bool dispenser{true}; // report full dispenser
 		CardPosition position{CardPosition::NO_CARD};
 
-		uint8_t GetByte() {
-			return 1 << (shutter ? 7 : 6) | (dispenser ? 1 : 0 ) << 5 | static_cast<uint8_t>(position);
+		uint8_t GetByte()
+		{
+			return 1 << (shutter ? 7 : 6) | (dispenser ? 1 : 0) << 5 |
+			       static_cast<uint8_t>(position);
 		}
 	};
 
@@ -60,11 +62,11 @@ protected:
 	void UpdateRStatus() override;
 	uint8_t GetRStatus() override;
 
-	void Command_A0_Clean() override;
+	void Command_10_Initalize() override;
 	void Command_D0_ShutterControl() override;
 
 	void MoveCard(CardIo::MovePositions position) override;
 	CardIo::MovePositions GetCardPos() override;
 };
 
-#endif //C1231BR
+#endif // C1231BR

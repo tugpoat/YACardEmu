@@ -126,12 +126,13 @@ int main()
 	int httpPort = 8080;
 
 	std::unique_ptr<SerIo> serialHandler{std::make_unique<SerIo>()};
-	if (!serialHandler->Open()) {
-		spdlog::critical("Couldn't initalize the serial controller.");
+
+	if (!readConfig(tgtDevice, serialHandler->portSettings, cardSettings, &httpPort)) {
 		return 1;
 	}
 
-	if (!readConfig(tgtDevice, serialHandler->portSettings, cardSettings, &httpPort)) {
+	if (!serialHandler->Open()) {
+		spdlog::critical("Couldn't initalize the serial controller.");
 		return 1;
 	}
 
@@ -146,7 +147,8 @@ int main()
 	cardHandler->cardSettings = cardSettings;
 
 	//TODO: Make sure the service is actually running
-	WebIo *web = new WebIo(&cardHandler->cardSettings, httpPort);
+	std::unique_ptr<WebIo> webHandler{
+	        std::make_unique<WebIo>(&cardHandler->cardSettings, httpPort)};
 
 	SerIo::Status serialStatus;
 	CardIo::StatusCode cardStatus;
