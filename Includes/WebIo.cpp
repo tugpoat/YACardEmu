@@ -21,76 +21,83 @@
 
 #include "WebIo.h"
 
-WebIo::WebIo(CardIo::Settings *card, int port)
+WebIo::WebIo(CardIo::Settings* card, int port, std::atomic_bool* running)
 {
-	m_card = card;
-	m_port = port;
-	setupRoutes();
-	std::thread(&WebIo::startServer, this).detach();
+	m_cardSettings = card;
+	m_port         = port;
+	g_running      = running;
+	SetupRoutes();
 }
 
 WebIo::~WebIo()
 {
-    svr.stop();
+	svr.stop();
 }
 
-void WebIo::startServer()
+void WebIo::Spawn()
 {
-    spdlog::info("Starting API server...");
-    svr.set_mount_point("/", "public");
+	std::thread(&WebIo::StartServer, this).detach();
+}
+
+void WebIo::StartServer()
+{
+	spdlog::info("Starting API server...");
+	svr.set_mount_point("/", "public");
 
 	svr.Get(R"(/api/v1/(\w+))",
-	    [&](const httplib::Request& req, httplib::Response& res) {
-		    Router(req, res);
-	    });
+	        [&](const httplib::Request& req, httplib::Response& res) {
+		        Router(req, res);
+	        });
 
 	svr.Post(R"(/api/v1/(\w+))",
-	     [&](const httplib::Request& req, httplib::Response& res) {
-		     Router(req, res);
-	});
+	         [&](const httplib::Request& req, httplib::Response& res) {
+		         Router(req, res);
+	         });
 
 	svr.Delete(R"(/api/v1/(\w+))",
 	           [&](const httplib::Request& req, httplib::Response& res) {
 		           Router(req, res);
-	});
+	           });
 
 	if (!svr.listen("0.0.0.0", m_port)) {
 		spdlog::critical("Failed to start API server!");
 	}
 }
 
-void WebIo::Router(const httplib::Request &req, httplib::Response &res)
+void WebIo::Router(const httplib::Request& req, httplib::Response& res)
 {
-    const auto route = req.matches[1].str();
+	const auto route = req.matches[1].str();
 
 	spdlog::debug("WebIo::Router: {0} -> {1}", req.method, route);
 
-	switch (routeValues[route])
-	{
+	switch (routeValues[route]) {
 	case Routes::cards:
-		res.set_content(generateCardListJSON(m_card->cardPath),
+		res.set_content(GenerateCardListJSON(m_cardSettings->cardPath),
 		                "application/json");
 		break;
 	case Routes::hasCard:
-		res.set_content(m_card->hasCard ? "true" : "false",
+		res.set_content(m_cardSettings->hasCard ? "true" : "false",
 		                "application/json");
 		break;
 	case Routes::readyCard:
-		res.set_content(m_card->waitingForCard ? "true" : "false",
+		res.set_content(m_cardSettings->waitingForCard ? "true" : "false",
 		                "application/json");
 		break;
-	case Routes::insertedCard: insertedCard(req, res); break;
+	case Routes::insertedCard: InsertedCard(req, res); break;
 	case Routes::dispenser:
 		if (req.method == "DELETE") {
-			m_card->reportDispenserEmpty = true;
+			m_cardSettings->reportDispenserEmpty = true;
 		} else if (req.method == "POST") {
-			m_card->reportDispenserEmpty = false;
+			m_cardSettings->reportDispenserEmpty = false;
 		}
 
-		res.set_content(m_card->reportDispenserEmpty ? "empty" : "full",
+		res.set_content(m_cardSettings->reportDispenserEmpty ? "empty" : "full",
 		                "text/plain");
 		break;
-	case Routes::stop: svr.stop(); break;
+	case Routes::stop:
+		svr.stop();
+		g_running = false;
+		break;
 	default:
 		spdlog::warn("WebIo::Router: Unsupported route \"{}\"", req.path);
 		res.status = 404;
@@ -98,7 +105,7 @@ void WebIo::Router(const httplib::Request &req, httplib::Response &res)
 	}
 }
 
-void WebIo::insertedCard(const httplib::Request& req, httplib::Response& res)
+void WebIo::InsertedCard(const httplib::Request& req, httplib::Response& res)
 {
 	if (req.method == "DELETE") {
 		res.set_content("null", "application/json");
@@ -107,11 +114,11 @@ void WebIo::insertedCard(const httplib::Request& req, httplib::Response& res)
 
 	if (req.method == "POST") {
 		if (req.has_param("loadonly")) {
-			m_card->insertedCard = true;
+			m_cardSettings->insertedCard = true;
 		}
 
 		if (req.has_param("cardname")) {
-			m_card->cardName = req.get_param_value("cardname");
+			m_cardSettings->cardName = req.get_param_value("cardname");
 		}
 	}
 
@@ -120,12 +127,13 @@ void WebIo::insertedCard(const httplib::Request& req, httplib::Response& res)
 		return;
 	}
 
-	res.set_content(" { \"cardname\":\"" + m_card->cardName + "\", \"inserted\":" +
-	                        (m_card->insertedCard ? "true" : "false") + " }",
+	res.set_content(" { \"cardname\":\"" + m_cardSettings->cardName +
+	                        "\", \"inserted\":" +
+	                        (m_cardSettings->insertedCard ? "true" : "false") + " }",
 	                "application/json");
 }
 
-const std::string WebIo::generateCardListJSON(std::string basepath)
+const std::string WebIo::GenerateCardListJSON(std::string basepath)
 {
 	std::string list{"["};
 

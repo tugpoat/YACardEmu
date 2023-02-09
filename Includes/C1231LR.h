@@ -1,7 +1,7 @@
 /*
     YACardEmu
     ----------------
-    Copyright (C) 2020-2022 wutno (https://github.com/GXTX)
+    Copyright (C) 2020-2023 wutno (https://github.com/GXTX)
 
 
     This program is free software; you can redistribute it and/or modify
@@ -22,18 +22,18 @@
 #ifndef C1231LR_H
 #define C1231LR_H
 
-#include <vector>
-#include <iostream>
-#include <fstream>
 #include <atomic>
 #include <ctime>
+#include <fstream>
+#include <iostream>
+#include <vector>
 
 #include "CardIo.h"
 
-class C1231LR : public CardIo
-{
+class C1231LR : public CardIo {
 public:
-	C1231LR();
+	C1231LR(CardIo::Settings* cardSettings);
+
 protected:
 	enum class CardPosition {
 		NO_CARD                 = 0x30,
@@ -43,7 +43,7 @@ protected:
 		POS_EJECTED_NOT_REMOVED = 0x34,
 	};
 
-	CardPosition localStatus{CardPosition::NO_CARD};
+	CardPosition m_localStatus = CardPosition::NO_CARD;
 	bool HasCard() override;
 	void DispenseCard() override;
 	void EjectCard() override;
@@ -54,4 +54,4 @@ protected:
 	CardIo::MovePositions GetCardPos() override;
 };
 
-#endif //C1231LR
+#endif // C1231LR

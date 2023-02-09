@@ -19,87 +19,91 @@
     51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-#include <iostream>
-#include <chrono>
-#include <thread>
 #include <atomic>
+#include <chrono>
 #include <csignal>
+#include <iostream>
 #include <string>
+#include <thread>
 
 #include "C1231BR.h"
 #include "C1231LR.h"
 #include "SerIo.h"
 #include "WebIo.h"
 
+#include "ghc/filesystem.hpp"
 #include "httplib.h"
 #include "mini/ini.h"
 #include "spdlog/spdlog.h"
-#include "ghc/filesystem.hpp"
 
-// Globals
-static constexpr auto delay{std::chrono::microseconds(250)};
-std::atomic<bool> running{true};
+//
+struct Settings {
+	CardIo::Settings card{};
+	SerIo::Settings serial{};
+	int webPort = 8080;
+};
+Settings globalSettings{};
+std::atomic_bool running    = true;
+constexpr static auto delay = std::chrono::microseconds(250);
 //
 
-void sigHandler(int sig)
+void SigHandler(int sig)
 {
 	if (sig == SIGINT || sig == SIGTERM) {
 		running = false;
 	}
 }
 
-bool readConfig(std::string &device, SerIo::Settings &serial, CardIo::Settings &card, int *port)
+bool ReadConfig()
 {
 	// Read in config values
 	mINI::INIFile config("config.ini");
-
 	mINI::INIStructure ini;
-
 	std::string lport, lbaud, lparity;
-	
+
+	// TODO: Generate a default config
 	if (!config.read(ini)) {
-		// TODO: Generate INI
 		spdlog::critical("Unable to open config.ini!");
 		return false;
 	}
 
 	if (ini.has("config")) {
-		card.cardPath = ini["config"]["basepath"];
-		card.cardName = ini["config"]["autoselectedcard"]; // can be empty, we can select via api
-		lport = ini["config"]["apiport"];
-		device = ini["config"]["targetdevice"];
-		serial.devicePath = ini["config"]["serialpath"];
-		lbaud = ini["config"]["serialbaud"];
-		lparity = ini["config"]["serialparity"];
+		lport                        = ini["config"]["apiport"];
+		lbaud                        = ini["config"]["serialbaud"];
+		lparity                      = ini["config"]["serialparity"];
+		globalSettings.card.mech     = ini["config"]["targetdevice"];
+		globalSettings.card.cardPath = ini["config"]["basepath"];
+		globalSettings.card.cardName = ini["config"]["autoselectedcard"];
+		globalSettings.serial.devicePath = ini["config"]["serialpath"];
 	}
 
-	if (card.cardPath.empty()) {
-		card.cardPath = ghc::filesystem::current_path().string();
+	if (globalSettings.card.cardPath.empty()) {
+		globalSettings.card.cardPath = ghc::filesystem::current_path().string();
 	}
 
 	if (lport.empty()) {
-		*port = 8080;
-	} else { 
-		*port = std::stoi(lport);
+		globalSettings.webPort = 8080;
+	} else {
+		globalSettings.webPort = std::stoi(lport);
 	}
 
-	if (serial.devicePath.empty()) {
-		serial.devicePath = "/dev/ttyUSB1";
+	if (globalSettings.serial.devicePath.empty()) {
+		globalSettings.serial.devicePath = "/dev/ttyUSB1";
 	}
 
 	if (lbaud.empty()) {
-		serial.baudrate = 9600;
+		globalSettings.serial.baudRate = 9600;
 	} else {
-		serial.baudrate = std::stoi(lbaud);
+		globalSettings.serial.baudRate = std::stoi(lbaud);
 	}
 
 	if (lparity.empty()) {
-		serial.parity = SP_PARITY_NONE;
+		globalSettings.serial.parity = SP_PARITY_NONE;
 	} else {
 		if (lparity.find("even") != std::string::npos) {
-			serial.parity = SP_PARITY_EVEN;
+			globalSettings.serial.parity = SP_PARITY_EVEN;
 		} else {
-			serial.parity = SP_PARITY_NONE;
+			globalSettings.serial.parity = SP_PARITY_NONE;
 		}
 	}
 
@@ -117,41 +121,38 @@ int main()
 	spdlog::set_pattern("[%^%l%$] %v");
 
 	// Handle quitting gracefully via signals
-	std::signal(SIGINT, sigHandler);
-	std::signal(SIGTERM, sigHandler);
+	std::signal(SIGINT, SigHandler);
+	std::signal(SIGTERM, SigHandler);
 
-	CardIo::Settings cardSettings;
-	std::string tgtDevice{};
-	std::unique_ptr<CardIo> cardHandler{};
-	int httpPort = 8080;
-
-	std::unique_ptr<SerIo> serialHandler{std::make_unique<SerIo>()};
-
-	if (!readConfig(tgtDevice, serialHandler->portSettings, cardSettings, &httpPort)) {
+	if (!ReadConfig()) {
 		return 1;
 	}
 
+	std::unique_ptr<SerIo> serialHandler = std::make_unique<SerIo>(
+	        &globalSettings.serial);
 	if (!serialHandler->Open()) {
-		spdlog::critical("Couldn't initalize the serial controller.");
 		return 1;
 	}
 
-	if (tgtDevice == "C1231LR") {
-		cardHandler = std::make_unique<C1231LR>();
-	} else if (tgtDevice == "C1231BR") {
-		cardHandler = std::make_unique<C1231BR>();
+	std::unique_ptr<CardIo> cardHandler{};
+
+	if (globalSettings.card.mech.compare("C1231LR") == 0) {
+		cardHandler = std::make_unique<C1231LR>(&globalSettings.card);
+	} else if (globalSettings.card.mech.compare("C1231BR") == 0) {
+		cardHandler = std::make_unique<C1231BR>(&globalSettings.card);
 	} else {
-		spdlog::critical("Invalid target device: " + tgtDevice);
+		spdlog::critical("Invalid target device: {}",
+		                 globalSettings.card.mech);
 		return 1;
 	}
-	cardHandler->cardSettings = cardSettings;
 
-	//TODO: Make sure the service is actually running
-	std::unique_ptr<WebIo> webHandler{
-	        std::make_unique<WebIo>(&cardHandler->cardSettings, httpPort)};
+	// TODO: Make sure the service is actually running
+	std::unique_ptr<WebIo> webHandler = std::make_unique<WebIo>(
+	        &globalSettings.card, globalSettings.webPort, &running);
+	webHandler->Spawn();
 
-	SerIo::Status serialStatus;
-	CardIo::StatusCode cardStatus;
+	SerIo::Status serialStatus    = SerIo::Status::Okay;
+	CardIo::StatusCode cardStatus = CardIo::StatusCode::Okay;
 	std::vector<uint8_t> readBuffer{};
 	std::vector<uint8_t> writeBuffer{};
 
@@ -159,7 +160,7 @@ int main()
 		serialStatus = serialHandler->Read(readBuffer);
 
 		if (serialStatus != SerIo::Status::Okay && readBuffer.empty()) {
-			// TODO: device read/write should probably be a separate thread
+			// TODO: device should probably be a separate thread
 			std::this_thread::sleep_for(delay);
 			continue;
 		}
@@ -167,7 +168,7 @@ int main()
 		cardStatus = cardHandler->ReceivePacket(readBuffer);
 
 		if (cardStatus == CardIo::Okay) {
-			// We need to send our ACK as quick as possible even if it takes us time to handle the command.
+			// We need to send our ACK as quick as possible
 			serialHandler->SendAck();
 		} else if (cardStatus == CardIo::ServerWaitingReply) {
 			// Do not reply until we get this command

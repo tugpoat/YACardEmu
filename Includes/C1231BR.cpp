@@ -21,18 +21,18 @@
 
 #include "C1231BR.h"
 
-C1231BR::C1231BR() : CardIo() {}
+C1231BR::C1231BR(CardIo::Settings* cardSettings) : CardIo(cardSettings) {}
 
 void C1231BR::UpdateRStatus()
 {
 	// We "grab" the card for the user
 	if (localStatus.position == CardPosition::POS_IN_FRONT) {
-		cardSettings.insertedCard = false;
+		cardSettings->insertedCard = false;
 		MoveCard(MovePositions::NO_CARD);
 	}
 
 	// We require the user to "insert" a card if we're waiting
-	if (cardSettings.insertedCard &&
+	if (cardSettings->insertedCard &&
 	    localStatus.position == CardPosition::NO_CARD) {
 		MoveCard(MovePositions::READ_WRITE_HEAD);
 

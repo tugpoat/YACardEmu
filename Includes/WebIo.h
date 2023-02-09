@@ -22,36 +22,38 @@
 #ifndef WEBIO_H
 #define WEBIO_H
 
+#include <atomic>
+#include <iostream>
 #include <map>
 #include <string>
-#include <iostream>
-#include <utility>
 #include <thread>
+#include <utility>
 
 #include "CardIo.h"
 #include "base64.h"
 #include "httplib.h"
-#include "spdlog/spdlog.h"
 #include "spdlog/fmt/bin_to_hex.h"
+#include "spdlog/spdlog.h"
 
-class WebIo
-{
+class WebIo {
 public:
-	WebIo(CardIo::Settings *card, int port);
+	WebIo(CardIo::Settings* card, int port, std::atomic_bool* running);
 	~WebIo();
 
-	void startServer();
+	void Spawn();
+	void StartServer();
 
-	int m_port               = 0;
-	CardIo::Settings *m_card = nullptr;
+	int m_port                       = 0;
+	CardIo::Settings* m_cardSettings = nullptr;
+	std::atomic_bool* g_running      = nullptr;
+
 private:
 	httplib::Server svr = {};
 
-	void Router(const httplib::Request &req, httplib::Response &res);
-	const std::string generateCardListJSON(std::string basepath);
+	void Router(const httplib::Request& req, httplib::Response& res);
+	const std::string GenerateCardListJSON(std::string basepath);
 
-	enum class Routes
-	{
+	enum class Routes {
 		undefined, // All invalid routes will point here
 		cards,
 		hasCard,
@@ -63,7 +65,7 @@ private:
 
 	std::map<std::string, Routes> routeValues;
 
-	void setupRoutes()
+	void SetupRoutes()
 	{
 		routeValues["cards"]        = Routes::cards;
 		routeValues["hasCard"]      = Routes::hasCard;
@@ -73,7 +75,7 @@ private:
 		routeValues["stop"]         = Routes::stop;
 	}
 
-	void insertedCard(const httplib::Request& req, httplib::Response& res);
+	void InsertedCard(const httplib::Request& req, httplib::Response& res);
 };
 
-#endif //WEBIO_H
+#endif // WEBIO_H

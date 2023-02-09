@@ -1,7 +1,7 @@
 /*
     YACardEmu
     ----------------
-    Copyright (C) 2020-2022 wutno (https://github.com/GXTX)
+    Copyright (C) 2020-2023 wutno (https://github.com/GXTX)
 
 
     This program is free software; you can redistribute it and/or modify
@@ -32,7 +32,7 @@
 
 class C1231BR : public CardIo {
 public:
-	C1231BR();
+	C1231BR(CardIo::Settings* cardSettings);
 
 protected:
 	enum class CardPosition {

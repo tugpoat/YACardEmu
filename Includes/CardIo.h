@@ -1,7 +1,7 @@
 /*
     YACardEmu
     ----------------
-    Copyright (C) 2020-2022 wutno (https://github.com/GXTX)
+    Copyright (C) 2020-2023 wutno (https://github.com/GXTX)
 
 
     This program is free software; you can redistribute it and/or modify
@@ -23,23 +23,22 @@
 #define CARDIO_H
 
 #ifdef _WIN32
-#define _CRT_SECURE_NO_WARNINGS
+#	define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include <vector>
-#include <iostream>
-#include <fstream>
 #include <atomic>
 #include <ctime>
-#include <sstream>
+#include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <vector>
 
-#include "spdlog/spdlog.h"
-#include "spdlog/fmt/bin_to_hex.h"
 #include "ghc/filesystem.hpp"
+#include "spdlog/fmt/bin_to_hex.h"
+#include "spdlog/spdlog.h"
 
-class CardIo
-{
+class CardIo {
 public:
 	enum StatusCode {
 		Okay,
@@ -59,15 +58,17 @@ public:
 		bool hasCard{false};
 		bool waitingForCard{false};
 		bool reportDispenserEmpty{false};
+		std::string mech = "C1231LR";
 	};
 
-	CardIo();
+	CardIo(CardIo::Settings* settings);
 	virtual ~CardIo() = default;
-	CardIo::StatusCode BuildPacket(std::vector<uint8_t> &readBuffer);
-	CardIo::StatusCode ReceivePacket(std::vector<uint8_t> &writeBuffer);
+	CardIo::StatusCode BuildPacket(std::vector<uint8_t>& readBuffer);
+	CardIo::StatusCode ReceivePacket(std::vector<uint8_t>& writeBuffer);
 
-	Settings cardSettings;
-	std::string printName = "print.bin";
+	Settings* cardSettings = nullptr;
+	std::string printName  = "print.bin";
+
 protected:
 	// Status bytes:
 	//////////////////////////////////////////////
@@ -125,16 +126,16 @@ protected:
 		}
 	};
 
-	const uint8_t START_OF_TEXT = 0x02;
-	const uint8_t END_OF_TEXT = 0x03;
-	const uint8_t ENQUIRY = 0x05;
-	const uint8_t ACK = 0x06;
-	const uint8_t CARD_SIZE = 0xCF;
-	const uint8_t TRACK_SIZE = 0x45;
-	const uint8_t NUM_TRACKS = 3;
+	const uint8_t START_OF_TEXT     = 0x02;
+	const uint8_t END_OF_TEXT       = 0x03;
+	const uint8_t ENQUIRY           = 0x05;
+	const uint8_t ACK               = 0x06;
+	const uint8_t CARD_SIZE         = 0xCF;
+	const uint8_t TRACK_SIZE        = 0x45;
+	const uint8_t NUM_TRACKS        = 3;
 	const std::string versionString = "AP:S1234-5678,OS:S9012-3456,0000";
 
-	uint8_t GetByte(uint8_t **buffer);
+	uint8_t GetByte(uint8_t** buffer);
 	void HandlePacket();
 
 	std::vector<std::vector<uint8_t>> cardData{{}, {}, {}};
@@ -143,14 +144,14 @@ protected:
 	void UpdateStatusInBuffer();
 	void SetPError(P error_code);
 	void SetSError(S error_code);
-	bool ReadTrack(std::vector<uint8_t> &trackData, int trackNumber);
-	void WriteTrack(std::vector<uint8_t> &trackData, int trackNumber);
+	bool ReadTrack(std::vector<uint8_t>& trackData, int trackNumber);
+	void WriteTrack(std::vector<uint8_t>& trackData, int trackNumber);
 
 	// Commands
 	virtual void Command_10_Initalize();
 	void Command_20_ReadStatus();
 	void Command_33_ReadData2(); // multi-track read
-	void Command_35_GetData(); // Spit out the entire card
+	void Command_35_GetData();   // Spit out the entire card
 	void Command_40_Cancel();
 	void Command_53_WriteData2(); // multi-track write
 	void Command_78_PrintSettings2();
@@ -186,11 +187,11 @@ protected:
 	virtual uint8_t GetRStatus() = 0;
 	virtual void UpdateRStatus() = 0;
 
-	virtual bool HasCard() = 0;
-	virtual void DispenseCard() = 0;
-	virtual void EjectCard() = 0;
+	virtual bool HasCard()                        = 0;
+	virtual void DispenseCard()                   = 0;
+	virtual void EjectCard()                      = 0;
 	virtual void MoveCard(MovePositions position) = 0;
-	virtual CardIo::MovePositions GetCardPos() = 0;
+	virtual CardIo::MovePositions GetCardPos()    = 0;
 };
 
-#endif
+#endif // CARDIO_H

@@ -1,7 +1,7 @@
 /*
     YACardEmu
     ----------------
-    Copyright (C) 2020-2022 wutno (https://github.com/GXTX)
+    Copyright (C) 2020-2023 wutno (https://github.com/GXTX)
 
 
     This program is free software; you can redistribute it and/or modify
@@ -21,29 +21,29 @@
 
 #include "CardIo.h"
 
-CardIo::CardIo()
+CardIo::CardIo(CardIo::Settings* settings)
 {
-	startTime = std::time(nullptr);
+	startTime    = std::time(nullptr);
+	cardSettings = settings;
 }
 
 void CardIo::Command_10_Initalize()
 {
 	enum Mode {
-		Standard = 0x30, // We actually eject anyway..
-		EjectAfter = 0x31,
+		Standard            = 0x30, // We actually eject anyway..
+		EjectAfter          = 0x31,
 		ResetSpecifications = 0x32,
 	};
 
-	//Mode mode = static_cast<Mode>(currentPacket[0]);
+	// Mode mode = static_cast<Mode>(currentPacket[0]);
 
 	switch (currentStep) {
-		case 1:
-			if (HasCard()) {
-				EjectCard();
-			}
-			break;
-		default:
-			break;
+	case 1:
+		if (HasCard()) {
+			EjectCard();
+		}
+		break;
+	default: break;
 	}
 
 	if (currentStep > 1) {
@@ -54,33 +54,33 @@ void CardIo::Command_10_Initalize()
 void CardIo::Command_20_ReadStatus()
 {
 	switch (currentStep) {
-		default:
-			status.SoftReset();
-			runningCommand = false;
-			break;
+	default:
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
 void CardIo::Command_33_ReadData2()
 {
 	enum Mode {
-		Standard = 0x30, // read 69-bytes
+		Standard     = 0x30, // read 69-bytes
 		ReadVariable = 0x31, // variable length read, 1-47 bytes
-		CardCapture = 0x32, // pull in card?
+		CardCapture  = 0x32, // pull in card?
 	};
 
 	enum BitMode {
-		SevenBitParity = 0x30,
+		SevenBitParity   = 0x30,
 		EightBitNoParity = 0x31,
 	};
 
 	enum Track {
-		Track_1 = 0x30,
-		Track_2 = 0x31,
-		Track_3 = 0x32,
-		Track_1_And_2 = 0x33,
-		Track_1_And_3 = 0x34,
-		Track_2_And_3 = 0x35,
+		Track_1         = 0x30,
+		Track_2         = 0x31,
+		Track_3         = 0x32,
+		Track_1_And_2   = 0x33,
+		Track_1_And_3   = 0x34,
+		Track_2_And_3   = 0x35,
 		Track_1_2_And_3 = 0x36,
 	};
 
@@ -90,91 +90,104 @@ void CardIo::Command_33_ReadData2()
 	}
 
 	Mode mode = static_cast<Mode>(currentPacket[0]);
-	//BitMode bit = static_cast<BitMode>(currentPacket[1]);
+	// BitMode bit = static_cast<BitMode>(currentPacket[1]);
 	Track track = static_cast<Track>(currentPacket[2]);
 
 	switch (currentStep) {
-		case 1:
-			if (mode == static_cast<uint8_t>(Mode::CardCapture)) { // don't reply any card info if we get this
-				if (!HasCard()) {
-					status.s = S::WAITING_FOR_CARD;
-					spdlog::info("Game requests user to insert card");
-					cardSettings.waitingForCard = true;
-					currentStep--;
+	case 1:
+		// Don't reply any info if we get this
+		if (mode == static_cast<uint8_t>(Mode::CardCapture)) {
+			if (!HasCard()) {
+				status.s = S::WAITING_FOR_CARD;
+				spdlog::info("Game requests user to insert card");
+				cardSettings->waitingForCard = true;
+				currentStep--;
+			}
+		} else {
+			if (HasCard()) {
+				switch (track) {
+				case Track::Track_1:
+				case Track::Track_2:
+				case Track::Track_3: {
+					const uint8_t ctrack = static_cast<uint8_t>(
+					                               track) -
+					                       0x30;
+					cardData.at(ctrack).clear();
+					bool res = ReadTrack(cardData.at(ctrack),
+					                     ctrack);
+					if (!res) {
+						SetPError(P::READ_ERR);
+						return;
+					}
+					std::copy(cardData.at(ctrack).begin(),
+					          cardData.at(ctrack).end(),
+					          std::back_inserter(commandBuffer));
+				} break;
+				case Track::Track_1_And_2:
+				case Track::Track_1_And_3:
+				case Track::Track_2_And_3: {
+					// TODO: This feels bad...
+					uint8_t ctrack, ctrack1;
+
+					if (track == Track::Track_1_And_2) {
+						ctrack  = 0;
+						ctrack1 = 1;
+					} else if (track == Track::Track_1_And_3) {
+						ctrack  = 0;
+						ctrack1 = 2;
+					} else {
+						ctrack  = 1;
+						ctrack1 = 2;
+					}
+
+					cardData.at(ctrack).clear();
+					cardData.at(ctrack1).clear();
+
+					bool res = ReadTrack(cardData.at(ctrack),
+					                     ctrack);
+					res = ReadTrack(cardData.at(ctrack1), ctrack1);
+					if (!res) {
+						SetPError(P::READ_ERR);
+						return;
+					}
+
+					std::copy(cardData.at(ctrack).begin(),
+					          cardData.at(ctrack).end(),
+					          std::back_inserter(commandBuffer));
+					std::copy(cardData.at(ctrack1).begin(),
+					          cardData.at(ctrack1).end(),
+					          std::back_inserter(commandBuffer));
+				} break;
+				case Track::Track_1_2_And_3: {
+					cardData.clear();
+					cardData.resize(NUM_TRACKS);
+					for (int i = 0; i < NUM_TRACKS; i++) {
+						bool res = ReadTrack(cardData.at(i),
+						                     i);
+						if (!res) {
+							SetPError(P::READ_ERR);
+							return;
+						}
+						std::copy(cardData.at(i).begin(),
+						          cardData.at(i).end(),
+						          std::back_inserter(
+						                  commandBuffer));
+					}
+				} break;
+				default:
+					SetPError(P::ILLEGAL_ERR);
+					spdlog::warn("Unknown track read option {0:X}",
+					             static_cast<uint8_t>(track));
+					return;
 				}
 			} else {
-				if (HasCard()) {
-					switch (track) {
-						case Track::Track_1:
-						case Track::Track_2:
-						case Track::Track_3:
-							{
-								const uint8_t ctrack = static_cast<uint8_t>(track) - 0x30;
-								cardData.at(ctrack).clear();
-								bool res = ReadTrack(cardData.at(ctrack), ctrack);
-								if (!res) {
-									SetPError(P::READ_ERR);
-									return;
-								}
-								std::copy(cardData.at(ctrack).begin(), cardData.at(ctrack).end(), std::back_inserter(commandBuffer));
-							}
-							break;
-						case Track::Track_1_And_2:
-						case Track::Track_1_And_3:
-						case Track::Track_2_And_3:
-							{
-								// TODO: This feels bad...
-								uint8_t ctrack, ctrack1;
-
-								if (track == Track::Track_1_And_2) {
-									ctrack = 0; ctrack1 = 1;
-								} else if (track == Track::Track_1_And_3) {
-									ctrack = 0; ctrack1 = 2;
-								} else {
-									ctrack = 1; ctrack1 = 2;
-								}
-
-								cardData.at(ctrack).clear();
-								cardData.at(ctrack1).clear();
-
-								bool res = ReadTrack(cardData.at(ctrack), ctrack);
-								res = ReadTrack(cardData.at(ctrack1), ctrack1);
-								if (!res) {
-									SetPError(P::READ_ERR);
-									return;
-								}
-
-								std::copy(cardData.at(ctrack).begin(), cardData.at(ctrack).end(), std::back_inserter(commandBuffer));
-								std::copy(cardData.at(ctrack1).begin(), cardData.at(ctrack1).end(), std::back_inserter(commandBuffer));
-							}
-							break;
-						case Track::Track_1_2_And_3:
-							{
-								cardData.clear();
-								cardData.resize(NUM_TRACKS);
-								for (int i = 0; i < NUM_TRACKS; i++) {
-									bool res = ReadTrack(cardData.at(i), i);
-									if (!res) {
-										SetPError(P::READ_ERR);
-										return;
-									}
-									std::copy(cardData.at(i).begin(), cardData.at(i).end(), std::back_inserter(commandBuffer));
-								}
-							}
-							break;
-						default:
-							SetPError(P::ILLEGAL_ERR);
-							spdlog::warn("Unknown track read option {0:X}", static_cast<uint8_t>(track));
-							return;
-					}
-				} else {
-					// If we don't have a card and we have no other errors, assume this state.
-					status.s = S::WAITING_FOR_CARD;
-				}
+				// If we don't have a card and we have no other
+				// errors, assume this state.
+				status.s = S::WAITING_FOR_CARD;
 			}
+		}
 		break;
-		default:
-			break;
+	default: break;
 	}
 
 	if (currentStep > 1) {
@@ -184,29 +197,28 @@ void CardIo::Command_33_ReadData2()
 
 void CardIo::Command_35_GetData()
 {
-	// We don't start at 0 because some systems don't like us immediately replying.
-	// TODO: Should we be moving the card automatically under the read/write head?
 	switch (currentStep) {
-		case 1:
-			if (!HasCard()) {
-				// FIXME: Is this correct?
-				SetPError(P::ILLEGAL_ERR);
+	case 1:
+		if (!HasCard()) {
+			// FIXME: Is this correct?
+			SetPError(P::ILLEGAL_ERR);
+			return;
+		}
+
+		cardData.clear();
+		cardData.resize(NUM_TRACKS);
+		for (int i = 0; i < NUM_TRACKS; i++) {
+			bool res = ReadTrack(cardData.at(i), i);
+			if (!res) {
+				SetPError(P::READ_ERR);
 				return;
 			}
-
-			cardData.clear();
-			cardData.resize(NUM_TRACKS);
-			for (int i = 0; i < NUM_TRACKS; i++) {
-				bool res = ReadTrack(cardData.at(i), i);
-				if (!res) {
-					SetPError(P::READ_ERR);
-					return;
-				}
-				std::copy(cardData.at(i).begin(), cardData.at(i).end(), std::back_inserter(commandBuffer));
-			}
+			std::copy(cardData.at(i).begin(),
+			          cardData.at(i).end(),
+			          std::back_inserter(commandBuffer));
+		}
 		break;
-		default:
-			break;
+	default: break;
 	}
 
 	if (currentStep > 1) {
@@ -217,115 +229,124 @@ void CardIo::Command_35_GetData()
 void CardIo::Command_40_Cancel()
 {
 	switch (currentStep) {
-		default:
-			status.SoftReset();
-			runningCommand = false;
-			break;
+	default:
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
 void CardIo::Command_53_WriteData2()
 {
 	enum Mode {
-		Standard = 0x30, // 69-bytes
+		Standard      = 0x30, // 69-bytes
 		WriteVariable = 0x31, // variable length, 1-47 bytes
 	};
 
 	enum BitMode {
-		SevenBitParity = 0x30,
+		SevenBitParity   = 0x30,
 		EightBitNoParity = 0x31,
 	};
 
 	enum Track {
-		Track_1 = 0x30,
-		Track_2 = 0x31,
-		Track_3 = 0x32,
-		Track_1_And_2 = 0x33,
-		Track_1_And_3 = 0x34,
-		Track_2_And_3 = 0x35,
+		Track_1         = 0x30,
+		Track_2         = 0x31,
+		Track_3         = 0x32,
+		Track_1_And_2   = 0x33,
+		Track_1_And_3   = 0x34,
+		Track_2_And_3   = 0x35,
 		Track_1_2_And_3 = 0x36,
 	};
 
 	if (currentPacket.size() < 3) {
 		SetPError(P::SYSTEM_ERR);
 		return;
-	} 
+	}
 
 	Mode mode = static_cast<Mode>(currentPacket[0]);
-	//BitMode bit = static_cast<BitMode>(currentPacket[1]);
+	// BitMode bit = static_cast<BitMode>(currentPacket[1]);
 	Track track = static_cast<Track>(currentPacket[2]);
 
 	switch (currentStep) {
-		case 1:
-			if (!HasCard() || mode == Mode::WriteVariable) {
-				SetPError(P::ILLEGAL_ERR);
-			} else {
-				switch (track) {
-					case Track::Track_1:
-					case Track::Track_2:
-					case Track::Track_3:
-						{
-							const uint8_t ctrack = static_cast<uint8_t>(track) - 0x30;
-							cardData.at(ctrack).clear();
-							std::copy(currentPacket.begin() + 3, currentPacket.end(), std::back_inserter(cardData.at(ctrack)));
-							WriteTrack(cardData.at(ctrack), ctrack);
-						}
-						break;
-					case Track::Track_1_And_2:
-					case Track::Track_1_And_3:
-					case Track::Track_2_And_3:
-						{
-							if (currentPacket.size() - 3 < TRACK_SIZE + 1) {
-								SetPError(P::SYSTEM_ERR); // FIXME: Should we do this? Or should we just fill in NULL
-								return;
-							}
-
-							// TODO: This feels bad...
-							uint8_t ctrack, ctrack1;
-
-							if (track == Track::Track_1_And_2) {
-								ctrack = 0; ctrack1 = 1;
-							} else if (track == Track::Track_1_And_3) {
-								ctrack = 0; ctrack1 = 2;
-							} else {
-								ctrack = 1; ctrack1 = 2;
-							}
-
-							cardData.at(ctrack).clear();
-							cardData.at(ctrack1).clear();
-
-							std::copy(currentPacket.begin() + 3, currentPacket.begin() + 3 + TRACK_SIZE, std::back_inserter(cardData.at(ctrack)));
-							std::copy(currentPacket.begin() + 3 + TRACK_SIZE, currentPacket.end(), std::back_inserter(cardData.at(ctrack1)));
-
-							WriteTrack(cardData.at(ctrack), ctrack);
-							WriteTrack(cardData.at(ctrack1), ctrack1);
-						}
-						break;
-					case Track::Track_1_2_And_3:
-						{
-							if (currentPacket.size() - 3 < CARD_SIZE) {
-								SetPError(P::SYSTEM_ERR); // FIXME: Should we do this? Or should we just fill in NULL
-								return;
-							}
-
-							cardData.clear();
-							cardData.resize(NUM_TRACKS);
-							for (int i = 0; i < NUM_TRACKS; i++) {
-								const uint8_t offset = 3 + (i * TRACK_SIZE);
-								std::copy(currentPacket.begin() + offset, currentPacket.begin() + offset + TRACK_SIZE, std::back_inserter(cardData.at(i)));
-								WriteTrack(cardData.at(i), i);
-							}
-						}
-						break;
-					default:
-						SetPError(P::ILLEGAL_ERR);
-						spdlog::warn("Unknown track write option {0:X}", static_cast<uint8_t>(track));
-						return;
+	case 1:
+		if (!HasCard() || mode == Mode::WriteVariable) {
+			SetPError(P::ILLEGAL_ERR);
+		} else {
+			switch (track) {
+			case Track::Track_1:
+			case Track::Track_2:
+			case Track::Track_3: {
+				const uint8_t ctrack = static_cast<uint8_t>(track) -
+				                       0x30;
+				cardData.at(ctrack).clear();
+				std::copy(currentPacket.begin() + 3,
+				          currentPacket.end(),
+				          std::back_inserter(cardData.at(ctrack)));
+				WriteTrack(cardData.at(ctrack), ctrack);
+			} break;
+			case Track::Track_1_And_2:
+			case Track::Track_1_And_3:
+			case Track::Track_2_And_3: {
+				// TODO: Should we do this or just reply NULL?
+				if (currentPacket.size() - 3 < TRACK_SIZE + 1) {
+					SetPError(P::SYSTEM_ERR);
+					return;
 				}
+
+				// TODO: This feels bad...
+				uint8_t ctrack, ctrack1;
+
+				if (track == Track::Track_1_And_2) {
+					ctrack  = 0;
+					ctrack1 = 1;
+				} else if (track == Track::Track_1_And_3) {
+					ctrack  = 0;
+					ctrack1 = 2;
+				} else {
+					ctrack  = 1;
+					ctrack1 = 2;
+				}
+
+				cardData.at(ctrack).clear();
+				cardData.at(ctrack1).clear();
+
+				std::copy(currentPacket.begin() + 3,
+				          currentPacket.begin() + 3 + TRACK_SIZE,
+				          std::back_inserter(cardData.at(ctrack)));
+				std::copy(currentPacket.begin() + 3 + TRACK_SIZE,
+				          currentPacket.end(),
+				          std::back_inserter(cardData.at(ctrack1)));
+
+				WriteTrack(cardData.at(ctrack), ctrack);
+				WriteTrack(cardData.at(ctrack1), ctrack1);
+			} break;
+			case Track::Track_1_2_And_3: {
+				// TODO: Should we do this or just reply NULL?
+				if (currentPacket.size() - 3 < CARD_SIZE) {
+					SetPError(P::SYSTEM_ERR);
+					return;
+				}
+
+				cardData.clear();
+				cardData.resize(NUM_TRACKS);
+				for (int i = 0; i < NUM_TRACKS; i++) {
+					const uint8_t offset = 3 + (i * TRACK_SIZE);
+					std::copy(currentPacket.begin() + offset,
+					          currentPacket.begin() +
+					                  offset + TRACK_SIZE,
+					          std::back_inserter(cardData.at(i)));
+					WriteTrack(cardData.at(i), i);
+				}
+			} break;
+			default:
+				SetPError(P::ILLEGAL_ERR);
+				spdlog::warn("Unknown track write option {0:X}",
+				             static_cast<uint8_t>(track));
+				return;
 			}
-			break;
-		default:
-			break;
+		}
+		break;
+	default: break;
 	}
 
 	if (currentStep > 1) {
@@ -338,33 +359,32 @@ void CardIo::Command_53_WriteData2()
 void CardIo::Command_78_PrintSettings2()
 {
 	switch (currentStep) {
-		default:
-			status.SoftReset();
-			runningCommand = false;
-			break;
+	default:
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
 void CardIo::Command_7A_RegisterFont()
 {
 	switch (currentStep) {
-		default:
-			status.SoftReset();
-			runningCommand = false;
-			break;
+	default:
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
 void CardIo::Command_7B_PrintImage()
 {
 	switch (currentStep) {
-		case 1:
-			if (!HasCard()) {
-				SetPError(P::ILLEGAL_ERR);
-			}
-			break;
-		default:
-			break;
+	case 1:
+		if (!HasCard()) {
+			SetPError(P::ILLEGAL_ERR);
+		}
+		break;
+	default: break;
 	}
 
 	if (currentStep > 1) {
@@ -375,12 +395,13 @@ void CardIo::Command_7B_PrintImage()
 void CardIo::Command_7C_PrintL()
 {
 	enum Mode {
-		Wait = 0x30, // is it expected to run this in the background after WriteData2?
+		Wait = 0x30, // is it expected to run this in the background
+		             // after WriteData2?
 		Now = 0x31,
 	};
 
 	enum BufferControl {
-		Clear = 0x30,
+		Clear     = 0x30,
 		DontClear = 0x31,
 	};
 
@@ -389,46 +410,45 @@ void CardIo::Command_7C_PrintL()
 		return;
 	}
 
-	//Mode mode = static_cast<Mode>(currentPacket[0]);
-	//BufferControl control = static_cast<BufferControl>(currentPacket[1]);
-	//uint8_t lineOffset = currentPacket[2];
+	// Mode mode = static_cast<Mode>(currentPacket[0]);
+	// BufferControl control = static_cast<BufferControl>(currentPacket[1]);
+	// uint8_t lineOffset = currentPacket[2];
 
 	switch (currentStep) {
-		case 1:
-			if (!HasCard()) {
-				SetPError(P::PRINT_ERR);
-			}
-			break;
-		case 2:
-			MoveCard(MovePositions::THERMAL_HEAD);
-			break;
-		case 3:
-			{
-				// FIXME: It seems the phyiscal readers ignore this, or have the ability to split between print "steps", either way, disable this for now
-				//if (control == BufferControl::Clear) {
-					printBuffer.clear();
-				//}
+	case 1:
+		if (!HasCard()) {
+			SetPError(P::PRINT_ERR);
+		}
+		break;
+	case 2: MoveCard(MovePositions::THERMAL_HEAD); break;
+	case 3: {
+		// FIXME: It seems the phyiscal readers ignore this, or have the
+		// ability to split between print "steps", either way, disable
+		// this for now
+		// if (control == BufferControl::Clear) {
+		printBuffer.clear();
+		//}
 
-				std::copy(currentPacket.begin() + 3, currentPacket.end(), std::back_inserter(printBuffer));
+		std::copy(currentPacket.begin() + 3,
+		          currentPacket.end(),
+		          std::back_inserter(printBuffer));
 
-				// FIXME: Do this better.
-				std::ofstream card;
-				std::string writeBack{};
-				std::string fullPath(cardSettings.cardPath.c_str());
-				fullPath.append(printName);
+		// FIXME: Do this better.
+		std::ofstream card;
+		std::string writeBack{};
+		std::string fullPath(cardSettings->cardPath.c_str());
+		fullPath.append(printName);
 
-				std::copy(printBuffer.begin(), printBuffer.end(), std::back_inserter(writeBack));
+		std::copy(printBuffer.begin(),
+		          printBuffer.end(),
+		          std::back_inserter(writeBack));
 
-				card.open(fullPath, std::ofstream::out | std::ofstream::binary);
-				card.write(writeBack.c_str(), writeBack.size());
-				card.close();
-			}
-			break;
-		case 4:
-			MoveCard(MovePositions::READ_WRITE_HEAD);
-			break;
-		default:
-			break;
+		card.open(fullPath, std::ofstream::out | std::ofstream::binary);
+		card.write(writeBack.c_str(), writeBack.size());
+		card.close();
+	} break;
+	case 4: MoveCard(MovePositions::READ_WRITE_HEAD); break;
+	default: break;
 	}
 
 	if (currentStep > 4) {
@@ -439,19 +459,14 @@ void CardIo::Command_7C_PrintL()
 void CardIo::Command_7D_Erase()
 {
 	switch (currentStep) {
-		case 1:
-			if (!HasCard()) {
-				SetPError(P::PRINT_ERR);
-			}
-			break;
-		case 2:
-			MoveCard(MovePositions::THERMAL_HEAD);
-			break;
-		case 3:
-			MoveCard(MovePositions::READ_WRITE_HEAD);
-			break;
-		default:
-			break;
+	case 1:
+		if (!HasCard()) {
+			SetPError(P::PRINT_ERR);
+		}
+		break;
+	case 2: MoveCard(MovePositions::THERMAL_HEAD); break;
+	case 3: MoveCard(MovePositions::READ_WRITE_HEAD); break;
+	default: break;
 	}
 
 	if (currentStep > 3) {
@@ -462,13 +477,12 @@ void CardIo::Command_7D_Erase()
 void CardIo::Command_7E_PrintBarcode()
 {
 	switch (currentStep) {
-		case 1:
-			if (!HasCard()) {
-				SetPError(P::ILLEGAL_ERR);
-			}
-			break;
-		default:
-			break;
+	case 1:
+		if (!HasCard()) {
+			SetPError(P::ILLEGAL_ERR);
+		}
+		break;
+	default: break;
 	}
 
 	if (currentStep > 1) {
@@ -478,14 +492,11 @@ void CardIo::Command_7E_PrintBarcode()
 
 void CardIo::Command_80_EjectCard()
 {
+	// For MT2EXP, we need 2 S::RUNNING_COMMAND replies
 	switch (currentStep) {
-		case 1: // FIXME: Special for "Transfer Card Data" in MT2EXP, we need 2 S::RUNNING_COMMAND replies
-			break;
-		case 2:
-			EjectCard();
-			break;
-		default:
-			break;
+	case 1: break;
+	case 2: EjectCard(); break;
+	default: break;
 	}
 
 	if (currentStep > 2) {
@@ -496,20 +507,15 @@ void CardIo::Command_80_EjectCard()
 void CardIo::Command_A0_Clean()
 {
 	switch (currentStep) {
-		case 1:
-			if (!HasCard()) {
-				status.s = S::WAITING_FOR_CARD;
-				currentStep--;
-			}
-			break;
-		case 2:
-			MoveCard(MovePositions::THERMAL_HEAD);
-			break;
-		case 3:
-			EjectCard();
-			break;
-		default: 
-			break;
+	case 1:
+		if (!HasCard()) {
+			status.s = S::WAITING_FOR_CARD;
+			currentStep--;
+		}
+		break;
+	case 2: MoveCard(MovePositions::THERMAL_HEAD); break;
+	case 3: EjectCard(); break;
+	default: break;
 	}
 
 	if (currentStep > 3) {
@@ -520,7 +526,7 @@ void CardIo::Command_A0_Clean()
 void CardIo::Command_B0_DispenseCardS31()
 {
 	enum Mode {
-		Dispense = 0x31,
+		Dispense  = 0x31,
 		CheckOnly = 0x32,
 	};
 
@@ -532,36 +538,35 @@ void CardIo::Command_B0_DispenseCardS31()
 	Mode mode = static_cast<Mode>(currentPacket[0]);
 
 	switch (currentStep) {
-		case 1:
-			if (mode == Mode::CheckOnly) {
-				if (cardSettings.reportDispenserEmpty) {
-					status.s = S::DISPENSER_EMPTY;
-				} else {
-					status.s = S::CARD_FULL;
-				}
+	case 1:
+		if (mode == Mode::CheckOnly) {
+			if (cardSettings->reportDispenserEmpty) {
+				status.s = S::DISPENSER_EMPTY;
 			} else {
-				if (status.s != S::ILLEGAL_COMMAND) {
-					if (HasCard()) {
-						SetSError(S::ILLEGAL_COMMAND);
+				status.s = S::CARD_FULL;
+			}
+		} else {
+			if (status.s != S::ILLEGAL_COMMAND) {
+				if (HasCard()) {
+					SetSError(S::ILLEGAL_COMMAND);
+				} else {
+					if (cardSettings->reportDispenserEmpty) {
+						status.s = S::DISPENSER_EMPTY;
 					} else {
-						if (cardSettings.reportDispenserEmpty) {
-							status.s = S::DISPENSER_EMPTY;
-						} else {
-							DispenseCard();
-						}
+						DispenseCard();
 					}
 				}
 			}
-			break;
-		case 2:
-			if (GetCardPos() == MovePositions::DISPENSER_THERMAL) {
-				MoveCard(MovePositions::READ_WRITE_HEAD);
-			} else if (!cardSettings.reportDispenserEmpty) {
-				SetPError(P::MOTOR_ERR);
-			}
-			break;
-		default:
-			break;
+		}
+		break;
+	case 2:
+		if (GetCardPos() == MovePositions::DISPENSER_THERMAL) {
+			MoveCard(MovePositions::READ_WRITE_HEAD);
+		} else if (!cardSettings->reportDispenserEmpty) {
+			SetPError(P::MOTOR_ERR);
+		}
+		break;
+	default: break;
 	}
 
 	if (currentStep > 2) {
@@ -573,17 +578,17 @@ void CardIo::Command_C0_ControlLED()
 {
 	// We don't need to handle this properly but let's leave some notes
 	enum Mode {
-		Off = 0x30,
-		On = 0x31,
+		Off       = 0x30,
+		On        = 0x31,
 		SlowBlink = 0x32,
 		FastBlink = 0x33,
 	};
 
 	switch (currentStep) {
-		default:
-			status.SoftReset();
-			runningCommand = false;
-			break;
+	default:
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
@@ -592,106 +597,109 @@ void CardIo::Command_C1_SetRetry()
 	// We don't need to handle this properly but let's leave some notes
 	// currentPacket[0] == 0x31 NONE ~ 0x39 MAX8
 	switch (currentStep) {
-		default:
-			status.SoftReset();
-			runningCommand = false;
+	default: status.SoftReset(); runningCommand = false;
 	}
 }
 
 void CardIo::Command_D0_ShutterControl()
 {
 	switch (currentStep) {
-		default:
-			SetSError(S::ILLEGAL_COMMAND);
-			break;
+	default: SetSError(S::ILLEGAL_COMMAND); break;
 	}
 }
 
 void CardIo::Command_E1_SetRTC()
 {
 	switch (currentStep) {
-		default:
-			{
-				std::stringstream timeStrS{};
-				std::string timeStr{};
-				std::copy(commandBuffer.begin(), commandBuffer.end(), std::back_inserter(timeStr));
+	default: {
+		std::stringstream timeStrS{};
+		std::string timeStr{};
+		std::copy(commandBuffer.begin(),
+		          commandBuffer.end(),
+		          std::back_inserter(timeStr));
 
-				timeStrS << timeStr;
+		timeStrS << timeStr;
 
-				std::tm *tempTime{};
-				timeStrS >> std::get_time(tempTime, "%y%m%d%H%M%S");
-				setTime = std::mktime(tempTime);
-			}
-			status.SoftReset();
-			runningCommand = false;
-			break;
+		std::tm* tempTime{};
+		timeStrS >> std::get_time(tempTime, "%y%m%d%H%M%S");
+		setTime = std::mktime(tempTime);
+	}
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
 void CardIo::Command_F0_GetVersion()
 {
 	switch (currentStep) {
-		case 0:
-			std::copy(versionString.begin(), versionString.end(), std::back_inserter(commandBuffer));
-			status.SoftReset();
-			runningCommand = false;
-			break;
-		default:
-			break;
+	case 0:
+		std::copy(versionString.begin(),
+		          versionString.end(),
+		          std::back_inserter(commandBuffer));
+		status.SoftReset();
+		runningCommand = false;
+		break;
+	default: break;
 	}
 }
 
 void CardIo::Command_F1_GetRTC()
 {
 	switch (currentStep) {
-		case 0:
-			{
-				std::string timeStr(13, 0);
-				std::time_t currentTime = std::time(nullptr);
+	case 0: {
+		std::string timeStr(13, 0);
+		std::time_t currentTime = std::time(nullptr);
 
-				std::time_t convTime{};
+		std::time_t convTime{};
 
-				if (setTime != 0) {
-					convTime = setTime + currentTime - startTime;
-				} else {
-					convTime = currentTime;
-				}
+		if (setTime != 0) {
+			convTime = setTime + currentTime - startTime;
+		} else {
+			convTime = currentTime;
+		}
 
-				std::strftime(&timeStr[0], timeStr.size(), "%y%m%d%H%M%S", std::localtime(&convTime));
-				std::copy(timeStr.begin(), timeStr.end(), std::back_inserter(commandBuffer));
-			}
-			status.SoftReset();
-			runningCommand = false;
-			break;
-		default:
-			break;
+		std::strftime(&timeStr[0],
+		              timeStr.size(),
+		              "%y%m%d%H%M%S",
+		              std::localtime(&convTime));
+		std::copy(timeStr.begin(),
+		          timeStr.end(),
+		          std::back_inserter(commandBuffer));
+	}
+		status.SoftReset();
+		runningCommand = false;
+		break;
+	default: break;
 	}
 }
 
 void CardIo::Command_F5_CheckBattery()
 {
 	switch (currentStep) {
-		default:
-			// We don't do anything here because we never report a bad battery.
-			status.SoftReset();
-			runningCommand = false;
-			break;
+	default:
+		status.SoftReset();
+		runningCommand = false;
+		break;
 	}
 }
 
-bool CardIo::ReadTrack(std::vector<uint8_t> &trackData, int trackNumber)
+bool CardIo::ReadTrack(std::vector<uint8_t>& trackData, int trackNumber)
 {
-	std::string fullPath = cardSettings.cardPath + cardSettings.cardName;
+	std::string fullPath = cardSettings->cardPath + cardSettings->cardName;
 	fullPath.append(".track_" + std::to_string(trackNumber));
 
 	if (ghc::filesystem::exists(fullPath.c_str())) {
 		if (ghc::filesystem::file_size(fullPath.c_str()) == TRACK_SIZE) {
-			std::ifstream card(fullPath.c_str(), std::ifstream::in | std::ifstream::binary);
+			std::ifstream card(fullPath.c_str(),
+			                   std::ifstream::in | std::ifstream::binary);
 			std::string readBack(TRACK_SIZE, 0);
 
 			card.read(&readBack[0], readBack.size());
 			trackData.clear();
-			std::copy(readBack.begin(), readBack.end(), std::back_inserter(trackData));
+			std::copy(readBack.begin(),
+			          readBack.end(),
+			          std::back_inserter(trackData));
 			card.close();
 		} else {
 			return false;
@@ -706,9 +714,9 @@ bool CardIo::ReadTrack(std::vector<uint8_t> &trackData, int trackNumber)
 	return true;
 }
 
-void CardIo::WriteTrack(std::vector<uint8_t> &trackData, int trackNumber)
+void CardIo::WriteTrack(std::vector<uint8_t>& trackData, int trackNumber)
 {
-	std::string fullPath = cardSettings.cardPath + cardSettings.cardName;
+	std::string fullPath = cardSettings->cardPath + cardSettings->cardName;
 	fullPath.append(".track_" + std::to_string(trackNumber));
 
 	std::string writeBack{};
@@ -722,13 +730,13 @@ void CardIo::WriteTrack(std::vector<uint8_t> &trackData, int trackNumber)
 
 void CardIo::SetPError(P error_code)
 {
-	status.p = error_code;
+	status.p       = error_code;
 	runningCommand = false;
 }
 
 void CardIo::SetSError(S error_code)
 {
-	status.s = error_code;
+	status.s       = error_code;
 	runningCommand = false;
 }
 
@@ -738,11 +746,10 @@ void CardIo::UpdateStatusInBuffer()
 	commandBuffer[2] = static_cast<uint8_t>(status.p);
 	commandBuffer[3] = static_cast<uint8_t>(status.s);
 
-	spdlog::debug("R: {0:X} P: {1:X} S: {2:X}", 
-		GetRStatus(),
-		static_cast<uint8_t>(status.p),
-		static_cast<uint8_t>(status.s)
-	);
+	spdlog::debug("R: {0:X} P: {1:X} S: {2:X}",
+	              GetRStatus(),
+	              static_cast<uint8_t>(status.p),
+	              static_cast<uint8_t>(status.s));
 }
 
 void CardIo::HandlePacket()
@@ -757,44 +764,45 @@ void CardIo::HandlePacket()
 
 	UpdateRStatus();
 
-	if (runningCommand) { // 20 is a special case, see function
-		if (cardSettings.waitingForCard) {
+	if (runningCommand) {
+		if (cardSettings->waitingForCard) {
 			spdlog::info("Game no lnger requests user to insert card");
-			cardSettings.waitingForCard = false;
+			cardSettings->waitingForCard = false;
 		}
 		switch (currentCommand) {
-			case 0x10: Command_10_Initalize(); break;
-			case 0x20: Command_20_ReadStatus(); break;
-			case 0x33: Command_33_ReadData2(); break;
-			case 0x35: Command_35_GetData(); break;
-			case 0x40: Command_40_Cancel(); break;
-			case 0x53: Command_53_WriteData2(); break;
-			case 0x78: Command_78_PrintSettings2(); break;
-			case 0x7A: Command_7A_RegisterFont(); break;
-			case 0x7B: Command_7B_PrintImage(); break;
-			case 0x7C: Command_7C_PrintL(); break;
-			case 0x7D: Command_7D_Erase(); break;
-			case 0x7E: Command_7E_PrintBarcode(); break;
-			case 0x80: Command_80_EjectCard(); break;
-			case 0xA0: Command_A0_Clean(); break;
-			case 0xB0: Command_B0_DispenseCardS31(); break;
-			case 0xC0: Command_C0_ControlLED(); break;
-			case 0xC1: Command_C1_SetRetry(); break;
-			case 0xD0: Command_D0_ShutterControl(); break;
-			case 0xE1: Command_E1_SetRTC(); break;
-			case 0xF0: Command_F0_GetVersion(); break;
-			case 0xF1: Command_F1_GetRTC(); break;
-			case 0xF5: Command_F5_CheckBattery(); break;
-			default:
-				spdlog::warn("CardIo::HandlePacket: Unhandled command {0:X}", currentCommand);
-				SetSError(S::ILLEGAL_COMMAND);
-				break;
+		case 0x10: Command_10_Initalize(); break;
+		case 0x20: Command_20_ReadStatus(); break;
+		case 0x33: Command_33_ReadData2(); break;
+		case 0x35: Command_35_GetData(); break;
+		case 0x40: Command_40_Cancel(); break;
+		case 0x53: Command_53_WriteData2(); break;
+		case 0x78: Command_78_PrintSettings2(); break;
+		case 0x7A: Command_7A_RegisterFont(); break;
+		case 0x7B: Command_7B_PrintImage(); break;
+		case 0x7C: Command_7C_PrintL(); break;
+		case 0x7D: Command_7D_Erase(); break;
+		case 0x7E: Command_7E_PrintBarcode(); break;
+		case 0x80: Command_80_EjectCard(); break;
+		case 0xA0: Command_A0_Clean(); break;
+		case 0xB0: Command_B0_DispenseCardS31(); break;
+		case 0xC0: Command_C0_ControlLED(); break;
+		case 0xC1: Command_C1_SetRetry(); break;
+		case 0xD0: Command_D0_ShutterControl(); break;
+		case 0xE1: Command_E1_SetRTC(); break;
+		case 0xF0: Command_F0_GetVersion(); break;
+		case 0xF1: Command_F1_GetRTC(); break;
+		case 0xF5: Command_F5_CheckBattery(); break;
+		default:
+			spdlog::warn("CardIo::HandlePacket: Unhandled command {0:X}",
+			             currentCommand);
+			SetSError(S::ILLEGAL_COMMAND);
+			break;
 		}
 		currentStep++;
 	}
 }
 
-uint8_t CardIo::GetByte(uint8_t **buffer)
+uint8_t CardIo::GetByte(uint8_t** buffer)
 {
 	const uint8_t value = (*buffer)[0];
 	*buffer += 1;
@@ -802,11 +810,11 @@ uint8_t CardIo::GetByte(uint8_t **buffer)
 	return value;
 }
 
-CardIo::StatusCode CardIo::ReceivePacket(std::vector<uint8_t> &readBuffer)
+CardIo::StatusCode CardIo::ReceivePacket(std::vector<uint8_t>& readBuffer)
 {
 	spdlog::debug("CardIo::ReceivePacket: ");
 
-	uint8_t *buffer = &readBuffer[0];
+	uint8_t* buffer = &readBuffer[0];
 
 	// First, read the sync byte
 	uint8_t sync = GetByte(&buffer);
@@ -828,7 +836,8 @@ CardIo::StatusCode CardIo::ReceivePacket(std::vector<uint8_t> &readBuffer)
 
 	uint8_t count = GetByte(&buffer);
 
-	// count counts itself but readBuffer will have both the STX and sum, we need to skip these.
+	// count counts itself but readBuffer will have both the STX and sum, we
+	// need to skip these.
 	if (count > readBuffer.size() - 2) {
 		spdlog::debug("Waiting for more data");
 		return SizeError;
@@ -840,7 +849,7 @@ CardIo::StatusCode CardIo::ReceivePacket(std::vector<uint8_t> &readBuffer)
 		return SyntaxError;
 	}
 
-	// Checksum is calcuated by xoring the entire packet excluding the start and the end
+	// Checksum is calcuated by xoring the entire packet
 	uint8_t actual_checksum = count;
 
 	// Clear previous packet
@@ -869,21 +878,22 @@ CardIo::StatusCode CardIo::ReceivePacket(std::vector<uint8_t> &readBuffer)
 
 	spdlog::debug("{:Xn}", spdlog::to_hex(currentPacket));
 
-	// FIXME: MT2EXP "Transfer Card Data" interrupts Eject to do a CheckStatus, if we don't actaully eject here the system will error
+	// FIXME: MT2EXP "Transfer Card Data" interrupts Eject to do a
+	// CheckStatus, if we don't actaully eject here the system will error
 	if (currentCommand == 0x80) {
 		EjectCard();
 	}
 
 	currentCommand = currentPacket[0];
 
-	// Remove the current command and the masters status bytes, we don't need it
+	// Remove the current command and the masters status bytes
 	currentPacket.erase(currentPacket.begin(), currentPacket.begin() + 4);
 
 	// TODO: Do all of this below better...
 	status.SoftReset();
-	status.s = S::RUNNING_COMMAND;
+	status.s       = S::RUNNING_COMMAND;
 	runningCommand = true;
-	currentStep = 0;
+	currentStep    = 0;
 
 	commandBuffer.clear();
 	commandBuffer.emplace_back(currentCommand);
@@ -894,7 +904,7 @@ CardIo::StatusCode CardIo::ReceivePacket(std::vector<uint8_t> &readBuffer)
 	return Okay;
 }
 
-CardIo::StatusCode CardIo::BuildPacket(std::vector<uint8_t> &writeBuffer)
+CardIo::StatusCode CardIo::BuildPacket(std::vector<uint8_t>& writeBuffer)
 {
 	spdlog::debug("CardIo::BuildPacket: ");
 

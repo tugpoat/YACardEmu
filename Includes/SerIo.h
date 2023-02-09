@@ -23,7 +23,7 @@
 #define SERIO_H
 
 #ifdef _WIN32
-#include <windows.h>
+#	include <windows.h>
 #endif
 
 #include <iostream>
@@ -31,11 +31,10 @@
 
 #include <libserialport.h>
 
-#include "spdlog/spdlog.h"
 #include "spdlog/fmt/bin_to_hex.h"
+#include "spdlog/spdlog.h"
 
-class SerIo
-{
+class SerIo {
 public:
 	enum class Status {
 		Okay,
@@ -46,28 +45,29 @@ public:
 	};
 
 	struct Settings {
-		std::string devicePath{};
-		int baudrate;
-		sp_parity parity;
+		int baudRate           = 9600;
+		sp_parity parity       = SP_PARITY_NONE;
+		std::string devicePath = "";
 	};
 
-	bool isPipe{};
-	Settings portSettings{};
+	bool m_isPipe            = false;
+	Settings* m_portSettings = nullptr;
 
-	SerIo();
+	SerIo(SerIo::Settings* settings);
 	~SerIo();
 
 	bool Open();
-	SerIo::Status Read(std::vector<uint8_t> &buffer);
-	SerIo::Status Write(std::vector<uint8_t> &buffer);
+	SerIo::Status Read(std::vector<uint8_t>& buffer);
+	SerIo::Status Write(std::vector<uint8_t>& buffer);
 	void SendAck();
+
 private:
 #ifdef _WIN32
-	HANDLE hPipe{};
+	HANDLE m_pipeHandle = INVALID_HANDLE_VALUE;
 #endif
 
-	sp_port *Port{nullptr};
-	sp_port_config *PortConfig{nullptr};
+	sp_port* m_portHandle        = nullptr;
+	sp_port_config* m_portConfig = nullptr;
 
 	std::vector<uint8_t> serialBuffer{};
 };
